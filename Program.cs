@@ -39,31 +39,39 @@ builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IExcelImportService, ExcelImportService>();
 
 builder.Services.AddHttpClient("OneDrive");
+
 builder.Services.AddScoped<IOneDriveExcelService, OneDriveExcelService>();
 
 builder.Services.AddMemoryCache();
+
 builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddScoped<HoldingsPriceService>();
 
+// Yahoo Finance
 builder.Services.AddHttpClient<IMarketDataService, YahooFinanceMarketDataService>(
     client =>
     {
         client.BaseAddress = new Uri("https://query1.finance.yahoo.com");
+
         client.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 StockPortfolio/1.0"
         );
+
         client.Timeout = TimeSpan.FromSeconds(20);
     }
 );
 
+// NSE Bhavcopy
 builder.Services.AddHttpClient<NseBhavcopyService>(
     client =>
     {
         client.BaseAddress = new Uri("https://nsearchives.nseindia.com");
+
         client.DefaultRequestHeaders.UserAgent.ParseAdd(
             "Mozilla/5.0 StockPortfolio/1.0"
         );
+
         client.Timeout = TimeSpan.FromSeconds(30);
     }
 );
@@ -76,11 +84,15 @@ builder.Services
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
+
             ValidateAudience = true,
+
             ValidateLifetime = true,
+
             ValidateIssuerSigningKey = true,
 
             ValidIssuer = jwt.Issuer,
+
             ValidAudience = jwt.Audience,
 
             IssuerSigningKey = new SymmetricSecurityKey(
@@ -94,6 +106,7 @@ builder.Services
 builder.Services.AddAuthorization();
 
 builder.Services.AddControllers();
+
 builder.Services.AddEndpointsApiExplorer();
 
 // Swagger
@@ -113,9 +126,13 @@ builder.Services.AddSwaggerGen(options =>
         new OpenApiSecurityScheme
         {
             Name = "Authorization",
+
             Type = SecuritySchemeType.Http,
+
             Scheme = "bearer",
+
             BearerFormat = "JWT",
+
             In = ParameterLocation.Header
         }
     );
@@ -129,6 +146,7 @@ builder.Services.AddSwaggerGen(options =>
                     Reference = new OpenApiReference
                     {
                         Type = ReferenceType.SecurityScheme,
+
                         Id = "Bearer"
                     }
                 }
@@ -148,10 +166,14 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .WithOrigins(
+                    // Local frontend
                     "http://localhost:5173",
                     "https://localhost:5173",
                     "http://localhost:5174",
-                    "https://localhost:5174"
+                    "https://localhost:5174",
+
+                    // Live Vercel frontend
+                    "https://mangotreeinvestovisery.vercel.app"
                 );
         }
     );
@@ -159,8 +181,9 @@ builder.Services.AddCors(options =>
 
 var app = builder.Build();
 
-// Swagger enabled for both Development and Production
+// Swagger available on Render also
 app.UseSwagger();
+
 app.UseSwaggerUI(options =>
 {
     options.SwaggerEndpoint(
@@ -171,13 +194,19 @@ app.UseSwaggerUI(options =>
     options.RoutePrefix = "swagger";
 });
 
+// HTTPS
 app.UseHttpsRedirection();
 
+// CORS must be before Authentication / Authorization
 app.UseCors("Frontend");
 
+// Authentication
 app.UseAuthentication();
+
+// Authorization
 app.UseAuthorization();
 
+// Controllers
 app.MapControllers();
 
 app.Run();
