@@ -64,4 +64,6 @@ public sealed class StockPurchase
     // =========================================================
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public ICollection<StockSaleAllocation> SaleAllocations { get; set; }
+    = new List<StockSaleAllocation>();
 }

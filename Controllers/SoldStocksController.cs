@@ -11,83 +11,342 @@ namespace StockPortfolio.Api.Controllers;
 [Authorize]
 public sealed class SoldStocksController(AppDbContext db) : ControllerBase
 {
-    private static readonly TimeSpan IndiaOffset = TimeSpan.FromHours(5.5);
+    private static readonly TimeSpan IndiaOffset =
+        TimeSpan.FromHours(5.5);
 
     [HttpGet]
     public async Task<IActionResult> GetAll(
         [FromQuery] DateOnly? fromDate,
         [FromQuery] DateOnly? toDate)
     {
-        if (fromDate.HasValue && toDate.HasValue && fromDate > toDate)
+        if (
+            fromDate.HasValue &&
+            toDate.HasValue &&
+            fromDate > toDate)
         {
-            return BadRequest(new { message = "From date cannot be after to date." });
+            return BadRequest(
+                new
+                {
+                    message =
+                        "From date cannot be after to date."
+                }
+            );
         }
 
-        var userId = User.GetUserId();
+        var userId =
+            User.GetUserId();
+
+
+        // =========================================================
+        // LOAD SALES + HOLDING + FIFO ALLOCATIONS + PURCHASES
+        // =========================================================
 
         var query =
-            from sale in db.StockSales.AsNoTracking()
-            join holding in db.StockHoldings.AsNoTracking()
-                on sale.StockHoldingId equals holding.Id
-            where holding.UserId == userId
-            select new
-            {
-                sale,
-                holding
-            };
+            db.StockSales
+                .AsNoTracking()
+
+                .Include(x =>
+                    x.Allocations)
+
+                .ThenInclude(x =>
+                    x.StockPurchase)
+
+                .Include(x =>
+                    x.StockHolding)
+
+                .Where(x =>
+                    x.StockHolding.UserId ==
+                    userId);
+
+
+        // =========================================================
+        // DATE FILTER
+        // =========================================================
 
         if (fromDate.HasValue)
         {
-            query = query.Where(x => x.sale.SellingDate >= fromDate.Value);
+            query =
+                query.Where(x =>
+                    x.SellingDate >=
+                    fromDate.Value);
         }
+
 
         if (toDate.HasValue)
         {
-            query = query.Where(x => x.sale.SellingDate <= toDate.Value);
+            query =
+                query.Where(x =>
+                    x.SellingDate <=
+                    toDate.Value);
         }
 
-        var items = await query
-            .OrderByDescending(x => x.sale.SellingDate)
-            .ThenByDescending(x => x.sale.CreatedAtUtc)
-            .Select(x => new
-            {
-                saleId = x.sale.Id,
-                holdingId = x.sale.StockHoldingId,
-                symbol = x.holding.Symbol,
-                companyName = x.holding.CompanyName,
-                exchange = x.holding.Exchange,
-                buyingDate = x.holding.BuyingDate,
-                buyingPrice = x.sale.BuyPriceAtSale ?? x.holding.BuyingPrice,
-                sellingDate = x.sale.SellingDate,
-                sellingQuantity = x.sale.SellingQuantity,
-                sellingPrice = x.sale.SellingPrice,
-                buyValue = x.sale.SellingQuantity * (x.sale.BuyPriceAtSale ?? x.holding.BuyingPrice),
-                saleValue = x.sale.SellingQuantity * x.sale.SellingPrice,
-                profitLoss =
-                    (x.sale.SellingPrice - (x.sale.BuyPriceAtSale ?? x.holding.BuyingPrice)) *
-                    x.sale.SellingQuantity,
-                profitLossPercentage =
-    (
-        (
-            (x.sale.SellingPrice -
-                (x.sale.BuyPriceAtSale ?? x.holding.BuyingPrice))
-            * x.sale.SellingQuantity
-        )
-        /
-        (
-            x.sale.SellingQuantity *
-            (x.sale.BuyPriceAtSale ?? x.holding.BuyingPrice)
-        )
-    ) * 100,
-                createdAtUtc = x.sale.CreatedAtUtc,
-                createdAtIst = new DateTimeOffset(
-                    DateTime.SpecifyKind(
-                        x.sale.CreatedAtUtc,
-                        DateTimeKind.Utc
-                    )
-                ).ToOffset(IndiaOffset)
-            })
-            .ToListAsync();
+
+        // =========================================================
+        // LOAD DATA
+        // =========================================================
+
+        var sales =
+            await query
+                .OrderByDescending(x =>
+                    x.SellingDate)
+
+                .ThenByDescending(x =>
+                    x.CreatedAtUtc)
+
+                .ThenByDescending(x =>
+                    x.Id)
+
+                .ToListAsync();
+
+
+        // =========================================================
+        // RESPONSE
+        // =========================================================
+
+        var items =
+            sales.Select(
+                sale =>
+                {
+                    var holding =
+                        sale.StockHolding;
+
+
+                    // =================================================
+                    // FIFO ALLOCATIONS
+                    // =================================================
+
+                    var fifoAllocations =
+                        sale.Allocations
+
+                            .OrderBy(x =>
+                                x.BuyingDate)
+
+                            .ThenBy(x =>
+                                x.Id)
+
+                            .Select(
+                                allocation =>
+                                {
+                                    var purchase =
+                                        allocation.StockPurchase;
+
+
+                                    return new
+                                    {
+                                        purchaseId =
+                                            allocation.StockPurchaseId,
+
+                                        serialNo =
+                                            purchase?.SerialNo ?? 0,
+
+                                        buyingDate =
+                                            allocation.BuyingDate,
+
+                                        quantity =
+                                            allocation.Quantity,
+
+                                        buyingPrice =
+                                            allocation.BuyingPrice,
+
+                                        buyValue =
+                                            allocation.BuyValue,
+
+                                        holdingDays =
+                                            allocation.HoldingDays,
+
+                                        term =
+                                            allocation.Term,
+
+                                        saleValue =
+                                            allocation.Quantity *
+                                            sale.SellingPrice,
+
+                                        profitLoss =
+                                            (
+                                                sale.SellingPrice -
+                                                allocation.BuyingPrice
+                                            )
+                                            *
+                                            allocation.Quantity
+                                    };
+                                }
+                            )
+                            .ToArray();
+
+
+                    // =================================================
+                    // TOTAL BUY VALUE
+                    // =================================================
+
+                    var buyValue =
+                        fifoAllocations.Length > 0
+
+                            ? fifoAllocations.Sum(
+                                x =>
+                                    x.buyValue
+                            )
+
+                            : sale.SellingQuantity *
+                              (
+                                  sale.BuyPriceAtSale
+                                  ??
+                                  holding.BuyingPrice
+                              );
+
+
+                    // =================================================
+                    // WEIGHTED BUY PRICE
+                    // =================================================
+
+                    var buyingPrice =
+                        sale.SellingQuantity == 0
+
+                            ? 0m
+
+                            : buyValue /
+                              sale.SellingQuantity;
+
+
+                    // =================================================
+                    // SALE VALUE
+                    // =================================================
+
+                    var saleValue =
+                        sale.SellingQuantity *
+                        sale.SellingPrice;
+
+
+                    // =================================================
+                    // PROFIT / LOSS
+                    // =================================================
+
+                    var profitLoss =
+                        saleValue -
+                        buyValue;
+
+
+                    var profitLossPercentage =
+                        buyValue == 0
+
+                            ? 0m
+
+                            : profitLoss /
+                              buyValue *
+                              100;
+
+
+                    // =================================================
+                    // MAIN BUYING DATE
+                    //
+                    // For display only:
+                    // oldest FIFO purchase date used in this sale.
+                    // Exact dates remain in fifoAllocations.
+                    // =================================================
+
+                    var buyingDate =
+                        fifoAllocations.Length > 0
+
+                            ? fifoAllocations
+                                .Min(x =>
+                                    x.buyingDate)
+
+                            : holding.BuyingDate;
+
+
+                    // =================================================
+                    // SALE-LEVEL TERM
+                    //
+                    // MIXED = some FIFO lots short-term and some long-term
+                    // =================================================
+
+                    string term;
+
+
+                    if (fifoAllocations.Length == 0)
+                    {
+                        term =
+                            "Unknown";
+                    }
+                    else
+                    {
+                        var distinctTerms =
+                            fifoAllocations
+                                .Select(x =>
+                                    x.term)
+
+                                .Distinct(
+                                    StringComparer.OrdinalIgnoreCase)
+
+                                .ToArray();
+
+
+                        term =
+                            distinctTerms.Length == 1
+                                ? distinctTerms[0]
+                                : "Mixed";
+                    }
+
+
+                    return new
+                    {
+                        saleId =
+                            sale.Id,
+
+                        holdingId =
+                            sale.StockHoldingId,
+
+                        symbol =
+                            holding.Symbol,
+
+                        companyName =
+                            holding.CompanyName,
+
+                        exchange =
+                            holding.Exchange,
+
+                        buyingDate,
+
+                        buyingPrice,
+
+                        sellingDate =
+                            sale.SellingDate,
+
+                        sellingQuantity =
+                            sale.SellingQuantity,
+
+                        sellingPrice =
+                            sale.SellingPrice,
+
+                        buyValue,
+
+                        saleValue,
+
+                        profitLoss,
+
+                        profitLossPercentage,
+
+                        term,
+
+                        fifoAllocations,
+
+                        createdAtUtc =
+                            sale.CreatedAtUtc,
+
+                        createdAtIst =
+                            new DateTimeOffset(
+                                DateTime.SpecifyKind(
+                                    sale.CreatedAtUtc,
+                                    DateTimeKind.Utc
+                                )
+                            )
+                            .ToOffset(
+                                IndiaOffset
+                            )
+                    };
+                }
+            )
+            .ToArray();
+
 
         return Ok(items);
     }

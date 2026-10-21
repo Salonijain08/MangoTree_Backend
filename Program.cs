@@ -11,7 +11,10 @@ using StockPortfolio.Api.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// ---------------------------------------------------------
 // JWT Configuration
+// ---------------------------------------------------------
+
 builder.Services.Configure<JwtOptions>(
     builder.Configuration.GetSection(JwtOptions.SectionName)
 );
@@ -21,19 +24,56 @@ var jwt = builder.Configuration
     .Get<JwtOptions>()
     ?? throw new InvalidOperationException("JWT configuration is missing.");
 
-if (string.IsNullOrWhiteSpace(jwt.Key) || Encoding.UTF8.GetByteCount(jwt.Key) < 32)
+if (string.IsNullOrWhiteSpace(jwt.Key) ||
+    Encoding.UTF8.GetByteCount(jwt.Key) < 32)
 {
-    throw new InvalidOperationException("Jwt:Key must be at least 32 bytes.");
+    throw new InvalidOperationException(
+        "Jwt:Key must be at least 32 bytes."
+    );
 }
 
-// PostgreSQL / Supabase Database
-builder.Services.AddDbContext<AppDbContext>(options =>
-    options.UseNpgsql(
-        builder.Configuration.GetConnectionString("DefaultConnection")
-    )
-);
 
+// ---------------------------------------------------------
+// Database Configuration
+//
+// Development -> Local SQL Server
+// Production  -> Supabase PostgreSQL
+// ---------------------------------------------------------
+
+var connectionString =
+    builder.Configuration.GetConnectionString("DefaultConnection")
+    ?? throw new InvalidOperationException(
+        "DefaultConnection is missing."
+    );
+
+if (builder.Environment.IsDevelopment())
+{
+    Console.WriteLine("==========================================");
+    Console.WriteLine("ENVIRONMENT: DEVELOPMENT");
+    Console.WriteLine("DATABASE: LOCAL SQL SERVER");
+    Console.WriteLine("==========================================");
+
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseSqlServer(connectionString)
+    );
+}
+else
+{
+    Console.WriteLine("==========================================");
+    Console.WriteLine("ENVIRONMENT: PRODUCTION");
+    Console.WriteLine("DATABASE: SUPABASE POSTGRESQL");
+    Console.WriteLine("==========================================");
+
+    builder.Services.AddDbContext<AppDbContext>(options =>
+        options.UseNpgsql(connectionString)
+    );
+}
+
+
+// ---------------------------------------------------------
 // Services
+// ---------------------------------------------------------
+
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
 builder.Services.AddScoped<IExcelImportService, ExcelImportService>();
@@ -48,7 +88,11 @@ builder.Services.AddSingleton(TimeProvider.System);
 
 builder.Services.AddScoped<HoldingsPriceService>();
 
+
+// ---------------------------------------------------------
 // Yahoo Finance
+// ---------------------------------------------------------
+
 builder.Services.AddHttpClient<IMarketDataService, YahooFinanceMarketDataService>(
     client =>
     {
@@ -62,7 +106,11 @@ builder.Services.AddHttpClient<IMarketDataService, YahooFinanceMarketDataService
     }
 );
 
+
+// ---------------------------------------------------------
 // NSE Bhavcopy
+// ---------------------------------------------------------
+
 builder.Services.AddHttpClient<NseBhavcopyService>(
     client =>
     {
@@ -76,7 +124,11 @@ builder.Services.AddHttpClient<NseBhavcopyService>(
     }
 );
 
+
+// ---------------------------------------------------------
 // Authentication
+// ---------------------------------------------------------
+
 builder.Services
     .AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
@@ -84,15 +136,11 @@ builder.Services
         options.TokenValidationParameters = new TokenValidationParameters
         {
             ValidateIssuer = true,
-
             ValidateAudience = true,
-
             ValidateLifetime = true,
-
             ValidateIssuerSigningKey = true,
 
             ValidIssuer = jwt.Issuer,
-
             ValidAudience = jwt.Audience,
 
             IssuerSigningKey = new SymmetricSecurityKey(
@@ -109,7 +157,11 @@ builder.Services.AddControllers();
 
 builder.Services.AddEndpointsApiExplorer();
 
+
+// ---------------------------------------------------------
 // Swagger
+// ---------------------------------------------------------
+
 builder.Services.AddSwaggerGen(options =>
 {
     options.SwaggerDoc(
@@ -126,13 +178,9 @@ builder.Services.AddSwaggerGen(options =>
         new OpenApiSecurityScheme
         {
             Name = "Authorization",
-
             Type = SecuritySchemeType.Http,
-
             Scheme = "bearer",
-
             BearerFormat = "JWT",
-
             In = ParameterLocation.Header
         }
     );
@@ -146,7 +194,6 @@ builder.Services.AddSwaggerGen(options =>
                     Reference = new OpenApiReference
                     {
                         Type = ReferenceType.SecurityScheme,
-
                         Id = "Bearer"
                     }
                 }
@@ -155,7 +202,11 @@ builder.Services.AddSwaggerGen(options =>
     );
 });
 
+
+// ---------------------------------------------------------
 // CORS
+// ---------------------------------------------------------
+
 builder.Services.AddCors(options =>
 {
     options.AddPolicy(
@@ -166,22 +217,29 @@ builder.Services.AddCors(options =>
                 .AllowAnyHeader()
                 .AllowAnyMethod()
                 .WithOrigins(
-                    // Local frontend
                     "http://localhost:5173",
                     "https://localhost:5173",
                     "http://localhost:5174",
                     "https://localhost:5174",
 
-                    // Live Vercel frontend
                     "https://mangotreeinvestovisery.vercel.app"
                 );
         }
     );
 });
 
+
+// ---------------------------------------------------------
+// Build App
+// ---------------------------------------------------------
+
 var app = builder.Build();
 
-// Swagger available on Render also
+
+// ---------------------------------------------------------
+// Swagger
+// ---------------------------------------------------------
+
 app.UseSwagger();
 
 app.UseSwaggerUI(options =>
@@ -194,19 +252,24 @@ app.UseSwaggerUI(options =>
     options.RoutePrefix = "swagger";
 });
 
-// HTTPS
+
+// ---------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------
+
 app.UseHttpsRedirection();
 
-// CORS must be before Authentication / Authorization
 app.UseCors("Frontend");
 
-// Authentication
 app.UseAuthentication();
 
-// Authorization
 app.UseAuthorization();
 
+
+// ---------------------------------------------------------
 // Controllers
+// ---------------------------------------------------------
+
 app.MapControllers();
 
 app.Run();

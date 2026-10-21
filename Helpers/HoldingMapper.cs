@@ -13,11 +13,14 @@ public static class HoldingMapper
     public static HoldingResponse ToResponse(
         this StockHolding holding)
     {
-        var today = MarketClock.Today;
+        var today =
+            MarketClock.Today;
 
-        var quote = SavedQuote(
-            holding,
-            today);
+        var quote =
+            SavedQuote(
+                holding,
+                today
+            );
 
         return holding.ToResponse(
             today,
@@ -28,8 +31,10 @@ public static class HoldingMapper
                 : quote is null
                     ? "UNAVAILABLE"
                     : "CACHED",
-            null);
+            null
+        );
     }
+
 
     // =========================================================
     // SAVED PRICE
@@ -50,12 +55,16 @@ public static class HoldingMapper
                 "NSE_BHAVCOPY",
                 null,
                 holding.ClosingPriceFetchedAtUtc
-                    ??
-                    new DateTimeOffset(
-                        DateTime.SpecifyKind(
-                            holding.UpdatedAtUtc,
-                            DateTimeKind.Utc)));
+                ??
+                new DateTimeOffset(
+                    DateTime.SpecifyKind(
+                        holding.UpdatedAtUtc,
+                        DateTimeKind.Utc
+                    )
+                )
+            );
         }
+
 
         if (
             holding.LatestTradePrice is > 0 &&
@@ -64,18 +73,27 @@ public static class HoldingMapper
         {
             return new PriceQuote(
                 holding.LatestTradePrice.Value,
+
                 DateOnly.FromDateTime(
                     time
                         .ToOffset(
-                            MarketClock.IndiaOffset)
-                        .DateTime),
+                            MarketClock.IndiaOffset
+                        )
+                        .DateTime
+                ),
+
                 "YAHOO",
+
                 time,
-                fetchedAt);
+
+                fetchedAt
+            );
         }
+
 
         return null;
     }
+
 
     // =========================================================
     // FULL HOLDING RESPONSE
@@ -96,14 +114,19 @@ public static class HoldingMapper
         var purchases =
             holding.Purchases
                 .Where(x =>
-                    x.BuyingDate <= valuationDate)
+                    x.BuyingDate <= valuationDate
+                )
                 .OrderBy(x =>
-                    x.BuyingDate)
+                    x.BuyingDate
+                )
                 .ThenBy(x =>
-                    x.SerialNo)
+                    x.SerialNo
+                )
                 .ThenBy(x =>
-                    x.Id)
+                    x.Id
+                )
                 .ToList();
+
 
         // =====================================================
         // LEGACY HOLDING FALLBACK
@@ -118,13 +141,35 @@ public static class HoldingMapper
                 new StockPurchase
                 {
                     Id = 0,
+
                     SerialNo = 0,
-                    StockHoldingId = holding.Id,
-                    BuyingDate = holding.BuyingDate,
-                    BuyingQuantity = holding.BuyingQuantity,
-                    BuyingPrice = holding.BuyingPrice
-                });
+
+                    StockHoldingId =
+                        holding.Id,
+
+                    BuyingDate =
+                        holding.BuyingDate,
+
+                    BuyingQuantity =
+                        holding.BuyingQuantity,
+
+                    BuyingPrice =
+                        holding.BuyingPrice
+                }
+            );
         }
+
+
+        // =====================================================
+        // PURCHASE LOOKUP
+        // =====================================================
+
+        var purchasesById =
+            purchases.ToDictionary(
+                x => x.Id,
+                x => x
+            );
+
 
         // =====================================================
         // TOTAL PURCHASE CALCULATION
@@ -132,13 +177,18 @@ public static class HoldingMapper
 
         var purchasedQuantity =
             purchases.Sum(
-                x => x.BuyingQuantity);
+                x =>
+                    x.BuyingQuantity
+            );
+
 
         var investment =
             purchases.Sum(
                 x =>
                     x.BuyingQuantity *
-                    x.BuyingPrice);
+                    x.BuyingPrice
+            );
+
 
         // =====================================================
         // SALES
@@ -147,14 +197,19 @@ public static class HoldingMapper
         var includedSales =
             holding.Sales
                 .Where(x =>
-                    x.SellingDate <= valuationDate)
+                    x.SellingDate <= valuationDate
+                )
                 .OrderBy(x =>
-                    x.SellingDate)
+                    x.SellingDate
+                )
                 .ThenBy(x =>
-                    x.CreatedAtUtc)
+                    x.CreatedAtUtc
+                )
                 .ThenBy(x =>
-                    x.Id)
+                    x.Id
+                )
                 .ToList();
+
 
         // =====================================================
         // TOTAL SOLD
@@ -162,32 +217,22 @@ public static class HoldingMapper
 
         var soldQuantity =
             includedSales.Sum(
-                x => x.SellingQuantity);
+                x =>
+                    x.SellingQuantity
+            );
+
 
         // =====================================================
         // AVERAGE SOLD RATE
-        // =====================================================
-        //
-        // Weighted average selling price:
-        //
-        // Total Sold Value / Total Sold Quantity
-        //
-        // Example:
-        // 2 @ 1600
-        // 2 @ 1200
-        //
-        // Total Sold Value = 5600
-        // Total Sold Qty   = 4
-        //
-        // Average Sold Rate = 1400
-        //
         // =====================================================
 
         var totalSoldValue =
             includedSales.Sum(
                 x =>
                     x.SellingQuantity *
-                    x.SellingPrice);
+                    x.SellingPrice
+            );
+
 
         var averageSoldRate =
             soldQuantity == 0
@@ -195,11 +240,14 @@ public static class HoldingMapper
                 : totalSoldValue /
                   soldQuantity;
 
+
         var remainingQuantity =
             Math.Max(
                 0m,
                 purchasedQuantity -
-                soldQuantity);
+                soldQuantity
+            );
+
 
         // =====================================================
         // FIFO CALCULATION
@@ -208,7 +256,27 @@ public static class HoldingMapper
         var consumedByPurchase =
             purchases.ToDictionary(
                 x => x.Id,
-                _ => 0m);
+                _ => 0m
+            );
+
+
+        // =====================================================
+        // LEGACY / REPLAY FIFO ALLOCATIONS
+        //
+        // This is important for old sales created BEFORE
+        // StockSaleAllocation table existed.
+        //
+        // New sales will have database allocations.
+        // Old sales will still receive correct FIFO allocation
+        // details through this replay.
+        // =====================================================
+
+        var replayAllocationsBySale =
+            new Dictionary<
+                int,
+                IReadOnlyCollection<SaleAllocationResponse>
+            >();
+
 
         // =====================================================
         // REPLAY ALL SALES USING FIFO
@@ -217,14 +285,22 @@ public static class HoldingMapper
         foreach (
             var sale in includedSales
                 .OrderBy(x =>
-                    x.SellingDate)
+                    x.SellingDate
+                )
                 .ThenBy(x =>
-                    x.CreatedAtUtc)
+                    x.CreatedAtUtc
+                )
                 .ThenBy(x =>
-                    x.Id))
+                    x.Id
+                ))
         {
             var quantityToAllocate =
                 sale.SellingQuantity;
+
+
+            var saleAllocations =
+                new List<SaleAllocationResponse>();
+
 
             foreach (
                 var purchase in purchases)
@@ -235,15 +311,20 @@ public static class HoldingMapper
                     break;
                 }
 
+
                 var alreadyConsumed =
                     consumedByPurchase[
-                        purchase.Id];
+                        purchase.Id
+                    ];
+
 
                 var availableFromPurchase =
                     Math.Max(
                         0m,
                         purchase.BuyingQuantity -
-                        alreadyConsumed);
+                        alreadyConsumed
+                    );
+
 
                 if (
                     availableFromPurchase <= 0)
@@ -251,54 +332,91 @@ public static class HoldingMapper
                     continue;
                 }
 
+
                 var consume =
                     Math.Min(
                         availableFromPurchase,
-                        quantityToAllocate);
+                        quantityToAllocate
+                    );
+
+
+                var buyValue =
+                    consume *
+                    purchase.BuyingPrice;
+
+
+                var holdingDays =
+                    sale.SellingDate.DayNumber -
+                    purchase.BuyingDate.DayNumber;
+
+
+                var term =
+                    holdingDays > 365
+                        ? "Long Term"
+                        : "Short Term";
+
+
+                saleAllocations.Add(
+                    new SaleAllocationResponse(
+                        purchase.Id,
+                        purchase.SerialNo,
+                        purchase.BuyingDate,
+                        consume,
+                        purchase.BuyingPrice,
+                        buyValue,
+                        holdingDays,
+                        term
+                    )
+                );
+
 
                 consumedByPurchase[
-                    purchase.Id] += consume;
+                    purchase.Id
+                ] += consume;
+
 
                 quantityToAllocate -=
                     consume;
             }
+
+
+            replayAllocationsBySale[
+                sale.Id
+            ] = saleAllocations;
         }
+
 
         // =====================================================
         // REMAINING COST
         // =====================================================
-        //
-        // This is the actual cost of the stocks that are
-        // currently remaining after FIFO sales.
-        //
-        // Example:
-        // 1 @ 1500
-        // 15 @ 1300
-        // 50 @ 1450
-        //
-        // Remaining Cost = 93500
-        //
-        // =====================================================
 
         var remainingBuyValue =
-            purchases.Sum(x =>
-            {
-                var soldFromPurchase =
-                    consumedByPurchase.TryGetValue(
-                        x.Id,
-                        out var sold)
-                            ? sold
-                            : 0m;
+            purchases.Sum(
+                x =>
+                {
+                    var soldFromPurchase =
+                        consumedByPurchase
+                            .TryGetValue(
+                                x.Id,
+                                out var sold
+                            )
+                                ? sold
+                                : 0m;
 
-                var remainingFromPurchase =
-                    Math.Max(
-                        0m,
-                        x.BuyingQuantity -
-                        soldFromPurchase);
 
-                return remainingFromPurchase *
-                       x.BuyingPrice;
-            });
+                    var remainingFromPurchase =
+                        Math.Max(
+                            0m,
+                            x.BuyingQuantity -
+                            soldFromPurchase
+                        );
+
+
+                    return remainingFromPurchase *
+                           x.BuyingPrice;
+                }
+            );
+
 
         // =====================================================
         // REMAINING AVERAGE BUYING PRICE
@@ -309,6 +427,7 @@ public static class HoldingMapper
                 ? 0m
                 : remainingBuyValue /
                   remainingQuantity;
+
 
         // =====================================================
         // CURRENT HOLDING VALUE
@@ -322,41 +441,84 @@ public static class HoldingMapper
                     : remainingQuantity *
                       quote.Price;
 
+
         // =====================================================
         // REALIZED PROFIT
-        // =====================================================
-        //
-        // Sale P/L remains separate.
-        //
-        // It does NOT get added to Total P/L below.
-        //
         // =====================================================
 
         var realized =
             includedSales.Sum(
-                x =>
-                    (
-                        x.SellingPrice -
-                        (
-                            x.BuyPriceAtSale
+                sale =>
+                {
+                    decimal saleBuyValue;
+
+
+                    // -----------------------------------------
+                    // Prefer saved FIFO allocations
+                    // -----------------------------------------
+
+                    if (
+                        sale.Allocations is not null &&
+                        sale.Allocations.Count > 0)
+                    {
+                        saleBuyValue =
+                            sale.Allocations.Sum(
+                                x =>
+                                    x.BuyValue
+                            );
+                    }
+
+                    // -----------------------------------------
+                    // Legacy sale fallback
+                    // -----------------------------------------
+
+                    else if (
+                        replayAllocationsBySale
+                            .TryGetValue(
+                                sale.Id,
+                                out var replayAllocations
+                            )
+                        &&
+                        replayAllocations.Count > 0)
+                    {
+                        saleBuyValue =
+                            replayAllocations.Sum(
+                                x =>
+                                    x.BuyValue
+                            );
+                    }
+
+                    // -----------------------------------------
+                    // Final legacy fallback
+                    // -----------------------------------------
+
+                    else
+                    {
+                        var buyPrice =
+                            sale.BuyPriceAtSale
                             ??
-                            averageBuyingPrice
-                        )
-                    )
-                    *
-                    x.SellingQuantity);
+                            averageBuyingPrice;
+
+
+                        saleBuyValue =
+                            sale.SellingQuantity *
+                            buyPrice;
+                    }
+
+
+                    var saleValue =
+                        sale.SellingQuantity *
+                        sale.SellingPrice;
+
+
+                    return saleValue -
+                           saleBuyValue;
+                }
+            );
+
 
         // =====================================================
         // UNREALIZED PROFIT
-        // =====================================================
-        //
-        // IMPORTANT:
-        // Current remaining stock P/L only.
-        //
-        // Formula:
-        //
-        // Current Value - Remaining Cost
-        //
         // =====================================================
 
         decimal? unrealized =
@@ -368,21 +530,17 @@ public static class HoldingMapper
                       remainingQuantity -
                       remainingBuyValue;
 
+
         // =====================================================
         // TOTAL PROFIT & LOSS
-        // =====================================================
         //
-        // IMPORTANT:
-        //
-        // For the holdings screen, Total P/L means the
-        // CURRENT / UNREALIZED P/L of the remaining stocks.
-        //
-        // Realized P/L is kept separately above.
-        //
+        // Main holdings screen total remains current /
+        // unrealized P/L.
         // =====================================================
 
         decimal? total =
             unrealized;
+
 
         // =====================================================
         // PROFIT & LOSS %
@@ -396,113 +554,128 @@ public static class HoldingMapper
                   remainingBuyValue *
                   100;
 
+
         // =====================================================
         // PURCHASE RESPONSE
         // =====================================================
 
         var purchaseResponses =
             purchases
-                .Select(x =>
-                {
-                    // -----------------------------------------
-                    // Original purchase value
-                    // -----------------------------------------
+                .Select(
+                    x =>
+                    {
+                        // -----------------------------------------
+                        // Original purchase value
+                        // -----------------------------------------
 
-                    var buyValue =
-                        x.BuyingQuantity *
-                        x.BuyingPrice;
+                        var buyValue =
+                            x.BuyingQuantity *
+                            x.BuyingPrice;
 
-                    // -----------------------------------------
-                    // FIFO sold quantity
-                    // -----------------------------------------
 
-                    var soldFromPurchase =
-                        consumedByPurchase.TryGetValue(
-                            x.Id,
-                            out var sold)
-                                ? sold
-                                : 0m;
+                        // -----------------------------------------
+                        // FIFO sold quantity
+                        // -----------------------------------------
 
-                    // -----------------------------------------
-                    // Remaining quantity
-                    // -----------------------------------------
+                        var soldFromPurchase =
+                            consumedByPurchase
+                                .TryGetValue(
+                                    x.Id,
+                                    out var sold
+                                )
+                                    ? sold
+                                    : 0m;
 
-                    var remainingFromPurchase =
-                        Math.Max(
-                            0m,
-                            x.BuyingQuantity -
-                            soldFromPurchase);
 
-                    // -----------------------------------------
-                    // Remaining buy value
-                    // -----------------------------------------
+                        // -----------------------------------------
+                        // Remaining quantity
+                        // -----------------------------------------
 
-                    var remainingBuyValueForPurchase =
-                        remainingFromPurchase *
-                        x.BuyingPrice;
+                        var remainingFromPurchase =
+                            Math.Max(
+                                0m,
+                                x.BuyingQuantity -
+                                soldFromPurchase
+                            );
 
-                    // -----------------------------------------
-                    // Current market price
-                    // -----------------------------------------
 
-                    decimal? currentPrice =
-                        quote?.Price;
+                        // -----------------------------------------
+                        // Remaining buy value
+                        // -----------------------------------------
 
-                    // -----------------------------------------
-                    // Current value ONLY remaining qty
-                    // -----------------------------------------
+                        var remainingBuyValueForPurchase =
+                            remainingFromPurchase *
+                            x.BuyingPrice;
 
-                    decimal? purchaseCurrentValue =
-                        currentPrice is null
-                            ? null
-                            : remainingFromPurchase *
-                              currentPrice.Value;
 
-                    // -----------------------------------------
-                    // Unrealized P/L ONLY remaining qty
-                    // -----------------------------------------
+                        // -----------------------------------------
+                        // Current market price
+                        // -----------------------------------------
 
-                    decimal? purchaseProfitLoss =
-                        purchaseCurrentValue is null
-                            ? null
-                            : purchaseCurrentValue.Value -
-                              remainingBuyValueForPurchase;
+                        decimal? currentPrice =
+                            quote?.Price;
 
-                    // -----------------------------------------
-                    // P/L %
-                    // -----------------------------------------
 
-                    decimal? purchaseProfitLossPercentage =
-                        remainingBuyValueForPurchase == 0
-                            ? remainingFromPurchase == 0
-                                ? 0m
-                                : null
-                            : purchaseProfitLoss is null
+                        // -----------------------------------------
+                        // Current value
+                        // -----------------------------------------
+
+                        decimal? purchaseCurrentValue =
+                            currentPrice is null
                                 ? null
-                                : purchaseProfitLoss.Value /
-                                  remainingBuyValueForPurchase *
-                                  100;
+                                : remainingFromPurchase *
+                                  currentPrice.Value;
 
-                    // -----------------------------------------
-                    // PURCHASE RESPONSE
-                    // -----------------------------------------
 
-                    return new PurchaseResponse(
-                        x.Id,
-                        x.SerialNo,
-                        x.BuyingDate,
-                        x.BuyingQuantity,
-                        x.BuyingPrice,
-                        soldFromPurchase,
-                        remainingFromPurchase,
-                        buyValue,
-                        remainingBuyValueForPurchase,
-                        currentPrice,
-                        purchaseCurrentValue,
-                        purchaseProfitLoss,
-                        purchaseProfitLossPercentage);
-                })
+                        // -----------------------------------------
+                        // Unrealized P/L
+                        // -----------------------------------------
+
+                        decimal? purchaseProfitLoss =
+                            purchaseCurrentValue is null
+                                ? null
+                                : purchaseCurrentValue.Value -
+                                  remainingBuyValueForPurchase;
+
+
+                        // -----------------------------------------
+                        // P/L %
+                        // -----------------------------------------
+
+                        decimal?
+                            purchaseProfitLossPercentage =
+                                remainingBuyValueForPurchase == 0
+                                    ? remainingFromPurchase == 0
+                                        ? 0m
+                                        : null
+
+                                    : purchaseProfitLoss is null
+                                        ? null
+
+                                        : purchaseProfitLoss.Value /
+                                          remainingBuyValueForPurchase *
+                                          100;
+
+
+                        return new PurchaseResponse(
+                            x.Id,
+                            x.SerialNo,
+                            x.BuyingDate,
+                            x.BuyingQuantity,
+                            x.BuyingPrice,
+                            soldFromPurchase,
+                            remainingFromPurchase,
+                            buyValue,
+                            remainingBuyValueForPurchase,
+                            currentPrice,
+                            purchaseCurrentValue,
+                            purchaseProfitLoss,
+                            purchaseProfitLossPercentage
+                        );
+                    }
+                )
                 .ToArray();
+
 
         // =====================================================
         // SALE RESPONSE
@@ -511,70 +684,181 @@ public static class HoldingMapper
         var sales =
             includedSales
                 .OrderByDescending(x =>
-                    x.SellingDate)
+                    x.SellingDate
+                )
                 .ThenByDescending(x =>
-                    x.CreatedAtUtc)
+                    x.CreatedAtUtc
+                )
                 .ThenByDescending(x =>
-                    x.Id)
-                .Select(x =>
-                {
-                    // -----------------------------------------
-                    // Buy price used for THIS sale
-                    // -----------------------------------------
-                    //
-                    // Prefer the frozen FIFO buy price saved
-                    // when the sale was created.
-                    //
-                    // Fallback to average buying price only
-                    // for legacy sales where BuyPriceAtSale
-                    // is not available.
-                    //
-                    // -----------------------------------------
+                    x.Id
+                )
+                .Select(
+                    sale =>
+                    {
+                        // =========================================
+                        // FIFO ALLOCATIONS
+                        // =========================================
 
-                    var buyPrice =
-                        x.BuyPriceAtSale
-                        ??
-                        averageBuyingPrice;
+                        IReadOnlyCollection<SaleAllocationResponse>
+                            fifoAllocations;
 
-                    // -----------------------------------------
-                    // Buy value of sold quantity
-                    // -----------------------------------------
 
-                    var buyValue =
-                        x.SellingQuantity *
-                        buyPrice;
+                        // -----------------------------------------
+                        // NEW SALE:
+                        // use allocations stored in database
+                        // -----------------------------------------
 
-                    // -----------------------------------------
-                    // Sale value
-                    // -----------------------------------------
+                        if (
+                            sale.Allocations is not null &&
+                            sale.Allocations.Count > 0)
+                        {
+                            fifoAllocations =
+                                sale.Allocations
 
-                    var saleValue =
-                        x.SellingQuantity *
-                        x.SellingPrice;
+                                    .OrderBy(x =>
+                                        x.BuyingDate
+                                    )
 
-                    // -----------------------------------------
-                    // Realized P/L
-                    // -----------------------------------------
+                                    .ThenBy(x =>
+                                        x.Id
+                                    )
 
-                    var realizedProfitLoss =
-                        saleValue -
-                        buyValue;
+                                    .Select(
+                                        allocation =>
+                                        {
+                                            var serialNo =
+                                                purchasesById
+                                                    .TryGetValue(
+                                                        allocation.StockPurchaseId,
+                                                        out var purchase
+                                                    )
+                                                        ? purchase.SerialNo
+                                                        : 0;
 
-                    // -----------------------------------------
-                    // SALE RESPONSE
-                    // -----------------------------------------
 
-                    return new SaleResponse(
-                        x.Id,
-                        x.SellingDate,
-                        x.SellingQuantity,
-                        x.SellingPrice,
-                        buyPrice,
-                        buyValue,
-                        saleValue,
-                        realizedProfitLoss);
-                })
+                                            return new SaleAllocationResponse(
+                                                allocation.StockPurchaseId,
+
+                                                serialNo,
+
+                                                allocation.BuyingDate,
+
+                                                allocation.Quantity,
+
+                                                allocation.BuyingPrice,
+
+                                                allocation.BuyValue,
+
+                                                allocation.HoldingDays,
+
+                                                allocation.Term
+                                            );
+                                        }
+                                    )
+                                    .ToArray();
+                        }
+
+                        // -----------------------------------------
+                        // OLD SALE:
+                        // reconstruct FIFO from purchase history
+                        // -----------------------------------------
+
+                        else if (
+                            replayAllocationsBySale
+                                .TryGetValue(
+                                    sale.Id,
+                                    out var replayAllocations
+                                ))
+                        {
+                            fifoAllocations =
+                                replayAllocations;
+                        }
+
+                        else
+                        {
+                            fifoAllocations =
+                                Array.Empty<
+                                    SaleAllocationResponse
+                                >();
+                        }
+
+
+                        // =========================================
+                        // BUY VALUE
+                        // =========================================
+
+                        var fifoBuyValue =
+                            fifoAllocations.Count > 0
+                                ? fifoAllocations.Sum(
+                                    x =>
+                                        x.BuyValue
+                                )
+                                : sale.SellingQuantity *
+                                  (
+                                      sale.BuyPriceAtSale
+                                      ??
+                                      averageBuyingPrice
+                                  );
+
+
+                        // =========================================
+                        // WEIGHTED FIFO BUY PRICE
+                        // =========================================
+
+                        var buyPrice =
+                            sale.SellingQuantity == 0
+                                ? 0m
+                                : fifoBuyValue /
+                                  sale.SellingQuantity;
+
+
+                        // =========================================
+                        // SALE VALUE
+                        // =========================================
+
+                        var saleValue =
+                            sale.SellingQuantity *
+                            sale.SellingPrice;
+
+
+                        // =========================================
+                        // REALIZED PROFIT / LOSS
+                        // =========================================
+
+                        var realizedProfitLoss =
+                            saleValue -
+                            fifoBuyValue;
+
+
+                        // =========================================
+                        // SALE RESPONSE
+                        // =========================================
+
+                        return new SaleResponse(
+                            sale.Id,
+
+                            sale.SellingDate,
+
+                            sale.SellingQuantity,
+
+                            sale.SellingPrice,
+
+                            buyPrice,
+
+                            fifoBuyValue,
+
+                            saleValue,
+
+                            realizedProfitLoss
+                        )
+                        {
+                            FifoAllocations =
+                                fifoAllocations
+                        };
+                    }
+                )
                 .ToArray();
+
 
         // =====================================================
         // BUYING DATE
@@ -584,7 +868,10 @@ public static class HoldingMapper
             purchases.Count == 0
                 ? holding.BuyingDate
                 : purchases.Min(
-                    x => x.BuyingDate);
+                    x =>
+                        x.BuyingDate
+                );
+
 
         // =====================================================
         // FINAL RESPONSE
@@ -592,56 +879,60 @@ public static class HoldingMapper
 
         return new HoldingResponse(
             holding.Id,
+
             holding.Symbol,
+
             holding.Exchange,
+
             holding.CompanyName,
+
             holding.InstrumentKey,
+
             buyingDate,
 
-            // Main holding quantity = REMAINING qty
+            // Main holding quantity = remaining quantity
             remainingQuantity,
 
-            // Main holding buying price = average price
-            // of REMAINING stocks
+            // Average buying price of remaining stocks
             averageBuyingPrice,
 
             soldQuantity,
+
             remainingQuantity,
 
             holding.ClosingPriceSource ==
                 "NSE_BHAVCOPY"
-                ? holding.LatestClosingPrice
-                : null,
+                    ? holding.LatestClosingPrice
+                    : null,
 
             holding.ClosingPriceSource ==
                 "NSE_BHAVCOPY"
-                ? holding.ClosingPriceDate
-                : null,
+                    ? holding.ClosingPriceDate
+                    : null,
 
             // Original total investment
             investment,
 
-            // Actual remaining cost
+            // Remaining FIFO cost
             remainingBuyValue,
 
             currentValue,
 
-            // Realized P/L remains separate
+            // Realized P/L
             realized,
 
-            // Current/unrealized P/L
+            // Unrealized P/L
             unrealized,
 
-            // IMPORTANT:
-            // Total P/L = Unrealized P/L
+            // Holdings total = current/unrealized P/L
             total,
 
-            // IMPORTANT:
-            // P/L % = Unrealized P/L / Remaining Cost
             percentage,
 
             remainingQuantity == 0,
-            sales)
+
+            sales
+        )
         {
             // =================================================
             // PURCHASES
@@ -650,20 +941,14 @@ public static class HoldingMapper
             Purchases =
                 purchaseResponses,
 
+
             // =================================================
             // AVERAGE SOLD RATE
-            // =================================================
-            //
-            // Weighted average of all sold transactions.
-            //
-            // Example:
-            // 2 @ 1600 + 2 @ 1200
-            // = Average Sold Rate ₹1400
-            //
             // =================================================
 
             AverageSoldRate =
                 averageSoldRate,
+
 
             // =================================================
             // PRICE INFORMATION
@@ -682,7 +967,8 @@ public static class HoldingMapper
                 quote?.Price,
 
             PriceSource =
-                quote?.Source ??
+                quote?.Source
+                ??
                 "UNAVAILABLE",
 
             PriceDate =

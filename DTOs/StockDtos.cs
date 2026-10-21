@@ -1,22 +1,49 @@
 namespace StockPortfolio.Api.DTOs;
 
+
+// =========================================================
+// HOLDING REQUESTS
+// =========================================================
+
 public record CreateHoldingRequest(
-    string Symbol, string Exchange, string? CompanyName, string? InstrumentKey,
-    DateOnly BuyingDate, decimal BuyingQuantity, decimal BuyingPrice);
+    string Symbol,
+    string Exchange,
+    string? CompanyName,
+    string? InstrumentKey,
+    DateOnly BuyingDate,
+    decimal BuyingQuantity,
+    decimal BuyingPrice);
+
 
 public record UpdateHoldingRequest(
-    string Symbol, string Exchange, string? CompanyName, string? InstrumentKey,
-    DateOnly BuyingDate, decimal BuyingQuantity, decimal BuyingPrice);
+    string Symbol,
+    string Exchange,
+    string? CompanyName,
+    string? InstrumentKey,
+    DateOnly BuyingDate,
+    decimal BuyingQuantity,
+    decimal BuyingPrice);
+
+
+// =========================================================
+// SALE REQUESTS
+// =========================================================
 
 public record CreateSaleRequest(
     DateOnly SellingDate,
     decimal SellingQuantity,
     decimal SellingPrice);
 
+
 public record UpdateSaleRequest(
     DateOnly SellingDate,
     decimal SellingQuantity,
     decimal SellingPrice);
+
+
+// =========================================================
+// PURCHASE RESPONSE
+// =========================================================
 
 public sealed record PurchaseResponse(
     int Id,
@@ -33,6 +60,26 @@ public sealed record PurchaseResponse(
     decimal? UnrealizedProfitLoss,
     decimal? ProfitLossPercentage);
 
+
+// =========================================================
+// FIFO SALE ALLOCATION RESPONSE
+// =========================================================
+
+public sealed record SaleAllocationResponse(
+    int PurchaseId,
+    int SerialNo,
+    DateOnly BuyingDate,
+    decimal Quantity,
+    decimal BuyingPrice,
+    decimal BuyValue,
+    int HoldingDays,
+    string Term);
+
+
+// =========================================================
+// SALE RESPONSE
+// =========================================================
+
 public sealed record SaleResponse(
     int Id,
     DateOnly SellingDate,
@@ -41,7 +88,19 @@ public sealed record SaleResponse(
     decimal BuyPrice,
     decimal BuyValue,
     decimal SaleValue,
-    decimal RealizedProfitLoss);
+    decimal RealizedProfitLoss)
+{
+    public IReadOnlyCollection<SaleAllocationResponse> FifoAllocations
+    {
+        get;
+        init;
+    } = Array.Empty<SaleAllocationResponse>();
+}
+
+
+// =========================================================
+// HOLDING RESPONSE
+// =========================================================
 
 public sealed record HoldingResponse(
     int Id,
@@ -66,38 +125,113 @@ public sealed record HoldingResponse(
     bool IsFullySold,
     IReadOnlyCollection<SaleResponse> Sales)
 {
-    public decimal AverageBuyingPrice => BuyingPrice;
+    public decimal AverageBuyingPrice =>
+        BuyingPrice;
 
-    public IReadOnlyCollection<PurchaseResponse> Purchases { get; init; } =
-        Array.Empty<PurchaseResponse>();
 
-    public decimal? LatestTradePrice { get; init; }
+    public IReadOnlyCollection<PurchaseResponse> Purchases
+    {
+        get;
+        init;
+    } = Array.Empty<PurchaseResponse>();
 
-    public DateTimeOffset? LatestTradePriceTimeUtc { get; init; }
 
-    public DateTimeOffset? LatestTradePriceFetchedAtUtc { get; init; }
+    public decimal? LatestTradePrice
+    {
+        get;
+        init;
+    }
 
-    public decimal? DisplayPrice { get; init; }
 
-    public string PriceSource { get; init; } = "UNAVAILABLE";
+    public DateTimeOffset? LatestTradePriceTimeUtc
+    {
+        get;
+        init;
+    }
 
-    public DateOnly? PriceDate { get; init; }
 
-    public DateTimeOffset? PriceTimeUtc { get; init; }
+    public DateTimeOffset? LatestTradePriceFetchedAtUtc
+    {
+        get;
+        init;
+    }
 
-    public DateTimeOffset? FetchedAtUtc { get; init; }
 
-    public DateOnly ValuationDate { get; init; }
+    public decimal? DisplayPrice
+    {
+        get;
+        init;
+    }
 
-    public string PriceStatus { get; init; } = "UNAVAILABLE";
 
-    public string? PriceMessage { get; init; }
+    public string PriceSource
+    {
+        get;
+        init;
+    } = "UNAVAILABLE";
 
-    public bool IsHistorical { get; init; }
+
+    public DateOnly? PriceDate
+    {
+        get;
+        init;
+    }
+
+
+    public DateTimeOffset? PriceTimeUtc
+    {
+        get;
+        init;
+    }
+
+
+    public DateTimeOffset? FetchedAtUtc
+    {
+        get;
+        init;
+    }
+
+
+    public DateOnly ValuationDate
+    {
+        get;
+        init;
+    }
+
+
+    public string PriceStatus
+    {
+        get;
+        init;
+    } = "UNAVAILABLE";
+
+
+    public string? PriceMessage
+    {
+        get;
+        init;
+    }
+
+
+    public bool IsHistorical
+    {
+        get;
+        init;
+    }
+
 
     // Weighted average selling rate of all sold quantity
-    public decimal? AverageSoldRate { get; init; }
+    public decimal? AverageSoldRate
+    {
+        get;
+        init;
+    }
 }
+
+
+// =========================================================
+// SOLD STOCK RESPONSE
+// =========================================================
 
 public sealed record SoldStockResponse(
     int SaleId,
