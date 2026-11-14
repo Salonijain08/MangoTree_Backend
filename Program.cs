@@ -257,14 +257,17 @@ app.UseSwaggerUI(options =>
 // Middleware
 // ---------------------------------------------------------
 
-app.UseHttpsRedirection();
+// ---------------------------------------------------------
+// Middleware
+// ---------------------------------------------------------
+
+app.UseRouting();
 
 app.UseCors("Frontend");
 
 app.UseAuthentication();
 
 app.UseAuthorization();
-
 
 // ---------------------------------------------------------
 // Controllers
