@@ -31,14 +31,71 @@ public sealed class AuthController(AppDbContext db, IPasswordHasher<User> hasher
     [HttpPost("login"), AllowAnonymous]
     public async Task<IActionResult> Login(LoginRequest request)
     {
-        var email = request.Email.Trim().ToLowerInvariant();
-        var user = await db.Users.SingleOrDefaultAsync(x => x.Email == email);
-        if (user is null || hasher.VerifyHashedPassword(user, user.PasswordHash, request.Password) == PasswordVerificationResult.Failed)
-            return Unauthorized(new { message = "Invalid email or password." });
-        var (token, expires) = tokens.Create(user);
-        return Ok(new AuthResponse(token, expires, new { user.Id, user.FullName, user.Email, user.Role }));
-    }
+        try
+        {
+            if (request == null ||
+                string.IsNullOrWhiteSpace(request.Email) ||
+                string.IsNullOrWhiteSpace(request.Password))
+            {
+                return BadRequest(new
+                {
+                    message = "Email and password are required."
+                });
+            }
 
+            var email = request.Email.Trim().ToLowerInvariant();
+
+            var user = await db.Users
+                .SingleOrDefaultAsync(x => x.Email == email);
+
+            if (user == null)
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid email or password."
+                });
+            }
+
+            var result = hasher.VerifyHashedPassword(
+                user,
+                user.PasswordHash,
+                request.Password
+            );
+
+            if (result == PasswordVerificationResult.Failed)
+            {
+                return Unauthorized(new
+                {
+                    message = "Invalid email or password."
+                });
+            }
+
+            var (token, expires) = tokens.Create(user);
+
+            return Ok(new AuthResponse(
+                token,
+                expires,
+                new
+                {
+                    user.Id,
+                    user.FullName,
+                    user.Email,
+                    user.Role
+                }
+            ));
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine(
+                $"LOGIN ERROR: {ex}"
+            );
+
+            return StatusCode(500, new
+            {
+                message = "An internal server error occurred during login."
+            });
+        }
+    }
     [HttpGet("me"), Authorize]
     public async Task<IActionResult> Me() => Ok(await db.Users.Where(x => x.Id == User.GetUserId())
         .Select(x => new { x.Id, x.FullName, x.Email, x.Role }).SingleAsync());
